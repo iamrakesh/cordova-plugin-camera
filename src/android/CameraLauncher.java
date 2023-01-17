@@ -714,7 +714,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         }
         // if the picture is not a jpeg or png, (a .heic for example) when processed to a bitmap
         // the file extension is changed to the output format, f.e. an input file my_photo.heic could become my_photo.jpg
-        return fileName.substring(fileName.lastIndexOf(".") + 1) + getExtensionForEncodingType();
+        return fileName.substring(0, fileName.lastIndexOf(".")) + getExtensionForEncodingType();
     }
 
     private String getExtensionForEncodingType() {
