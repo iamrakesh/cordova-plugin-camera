@@ -1055,8 +1055,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                     LOG.d(LOG_TAG, "Exception while closing file input stream.");
                 }
             }
-            if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight)))
+            if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight))){
                     return image;
+            }
         }
 
         int rotate = 0;
