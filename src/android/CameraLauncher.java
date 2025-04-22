@@ -741,6 +741,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
         String uriString = uri.toString();
         String mimeTypeOfGalleryFile = FileHelper.getMimeType(uriString, this.cordova);
+        if(mimeTypeOfGalleryFile.equalsIgnoreCase(PNG_MIME_TYPE)){
+            this.encodingType = PNG;
+        }
         InputStream input;
         try {
             input = cordova.getActivity().getContentResolver().openInputStream(uri);
@@ -1034,16 +1037,26 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
-        if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation)) {
-            Bitmap image = null;
-            try {
-                image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
-            } catch (OutOfMemoryError e) {
-                callbackContext.error(e.getLocalizedMessage());
-            } catch (Exception e) {
-                callbackContext.error(e.getLocalizedMessage());
+        InputStream imageFileStream = null;
+        Bitmap image = null;
+        try {
+            imageFileStream = FileHelper.getInputStreamFromUriString(imageUrl, cordova);
+            image = BitmapFactory.decodeStream(imageFileStream);
+        }  catch (OutOfMemoryError e) {
+            callbackContext.error(e.getLocalizedMessage());
+        } catch (Exception e){
+            callbackContext.error(e.getLocalizedMessage());
+        }
+        finally {
+            if (imageFileStream != null) {
+                try {
+                    imageFileStream.close();
+                } catch (IOException e) {
+                    LOG.d(LOG_TAG, "Exception while closing file input stream.");
+                }
             }
-            return image;
+            if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight)))
+                    return image;
         }
 
         int rotate = 0;
