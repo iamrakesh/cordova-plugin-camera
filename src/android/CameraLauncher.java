@@ -110,6 +110,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     //Where did this come from?
     private static final int CROP_CAMERA = 100;
+    private static final int IMAGE_SIZE_LIMIT = (20 * 1024 * 1024);
 
     private static final String TIME_FORMAT = "yyyyMMdd_HHmmss";
 
@@ -721,6 +722,22 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         return this.encodingType == JPEG ? JPEG_EXTENSION : PNG_EXTENSION;
     }
 
+     private long getImageSize(Uri uri) {
+        if (uri == null) return -1;
+
+        try (Cursor returnCursor = cordova.getActivity().getContentResolver().query(uri, null, null, null, null)) {
+            if (returnCursor != null && returnCursor.moveToFirst()) {
+                int sizeIndex = returnCursor.getColumnIndex(OpenableColumns.SIZE);
+                if (sizeIndex != -1 && !returnCursor.isNull(sizeIndex)) {
+                    return returnCursor.getLong(sizeIndex);
+                }
+            }
+        } catch (Exception e) {
+            LOG.e("FileSizeCheck", "Error getting file size for URI: " + uri, e);
+        }
+
+        return -1; // Return -1 to indicate failure
+    }
 
     /**
      * Applies all needed transformation to the image received from the gallery.
@@ -730,6 +747,17 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
+
+        long imageSize = getImageSize(uri);
+        if(imageSize == -1){
+            this.failPicture("Unable to retrieve Image Properties for provided URL");
+            return;
+        }
+        if(imageSize > IMAGE_SIZE_LIMIT){
+            this.failPicture("Photo Exceeds the limit");
+            return;
+        }
+
         if (uri == null) {
             if (croppedUri != null) {
                 uri = croppedUri;
@@ -1037,27 +1065,17 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
-        InputStream imageFileStream = null;
         Bitmap image = null;
-        try {
-            imageFileStream = FileHelper.getInputStreamFromUriString(imageUrl, cordova);
+        try(InputStream imageFileStream = FileHelper.getInputStreamFromUriString(imageUrl, cordova)) {
             image = BitmapFactory.decodeStream(imageFileStream);
         }  catch (OutOfMemoryError e) {
             callbackContext.error(e.getLocalizedMessage());
         } catch (Exception e){
             callbackContext.error(e.getLocalizedMessage());
         }
-        finally {
-            if (imageFileStream != null) {
-                try {
-                    imageFileStream.close();
-                } catch (IOException e) {
-                    LOG.d(LOG_TAG, "Exception while closing file input stream.");
-                }
-            }
-            if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight))){
-                    return image;
-            }
+
+        if ((this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation)) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight))) {
+            return image;
         }
 
         int rotate = 0;
