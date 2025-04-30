@@ -38,6 +38,7 @@
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
 static NSSet* org_apache_cordova_validArrowDirections;
+static const NSUInteger IMAGE_SIZE_LIMIT= (20 * 1024 * 1024);
 
 static NSString* toBase64(NSData* data) {
     SEL s1 = NSSelectorFromString(@"cdv_base64EncodedString");
@@ -699,6 +700,31 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
+
+    PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
+    if (phAsset) {
+        NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
+        PHAssetResource *resource = [resources firstObject];
+
+        __block long long imageSize = 0;
+        PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
+
+        [manager requestDataForAssetResource:resource
+                                     options:nil
+                            dataReceivedHandler:^(NSData *data) {
+                                imageSize += data.length;
+                            }
+                          completionHandler:^(NSError *error) {
+                              if (imageSize > imageSizeLimit) {
+                                  dispatch_async(dispatch_get_main_queue(), ^{
+                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Photo Exceeds the limit"];
+                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
+                                                                    [self.viewController dismissViewControllerAnimated:YES completion:nil];
+                                                                });
+                                  return;
+                              }
+                        }];
+      }
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
     __weak CDVCamera* weakSelf = self;
 
