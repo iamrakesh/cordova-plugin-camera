@@ -38,7 +38,7 @@
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
 static NSSet* org_apache_cordova_validArrowDirections;
-static const NSUInteger IMAGE_SIZE_LIMIT= (20 * 1024 * 1024);
+NSUInteger IMAGE_SIZE_LIMIT= (20 * 1024 * 1024);
 
 static NSString* toBase64(NSData* data) {
     SEL s1 = NSSelectorFromString(@"cdv_base64EncodedString");
@@ -89,6 +89,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
     pictureOptions.popoverSupported = NO;
     pictureOptions.usesGeolocation = NO;
+    IMAGE_SIZE_LIMIT = [[command argumentAtIndex:12]longValue] * 1024 * 1024;
 
     return pictureOptions;
 }
