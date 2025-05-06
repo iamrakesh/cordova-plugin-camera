@@ -110,7 +110,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     //Where did this come from?
     private static final int CROP_CAMERA = 100;
-    private static final int IMAGE_SIZE_LIMIT = (20 * 1024 * 1024);
+    private long IMAGE_SIZE_LIMIT = (20 * 1024 * 1024);
 
     private static final String TIME_FORMAT = "yyyyMMdd_HHmmss";
 
@@ -172,6 +172,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             this.allowEdit = args.getBoolean(7);
             this.correctOrientation = args.getBoolean(8);
             this.saveToPhotoAlbum = args.getBoolean(9);
+            this.IMAGE_SIZE_LIMIT = args.getLong(12) * 1024 * 1024;
 
             // If the user specifies a 0 or smaller width/height
             // make it -1 so later comparisons succeed
@@ -722,6 +723,15 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         return this.encodingType == JPEG ? JPEG_EXTENSION : PNG_EXTENSION;
     }
 
+    /**
+   * Retrieves the size of the image (or file) pointed to by the given URI.
+   *
+   * <p>This method uses the ContentResolver to query metadata about the file,
+   *
+   * @param uri The {@link android.net.Uri} pointing to the image or file.
+   * @return The size of the file in bytes, or -1 if the size could not be determined
+   *         (e.g., the URI is null, the size column is not available, or an error occurs).
+   */
      private long getImageSize(Uri uri) {
         if (uri == null) return -1;
 
