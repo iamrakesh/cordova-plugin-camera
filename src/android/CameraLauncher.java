@@ -99,6 +99,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private static final String GET_All = "Get All";
     private static final String CROPPED_URI_KEY = "croppedUri";
     private static final String IMAGE_URI_KEY = "imageUri";
+    private static final String IMAGE_SIZE_EXCEEDED_ERROR = "PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
     private static final String TAKE_PICTURE_ACTION = "takePicture";
 
@@ -764,7 +765,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             return;
         }
         if(imageSize > IMAGE_SIZE_LIMIT){
-            this.failPicture("Photo Exceeds the limit");
+            this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
             return;
         }
 

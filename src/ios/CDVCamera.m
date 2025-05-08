@@ -39,6 +39,7 @@
 
 static NSSet* org_apache_cordova_validArrowDirections;
 NSUInteger IMAGE_SIZE_LIMIT= (20 * 1024 * 1024);
+static const NSString * IMAGE_SIZE_EXCEEDED_ERROR = @"PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
 static NSString* toBase64(NSData* data) {
     SEL s1 = NSSelectorFromString(@"cdv_base64EncodedString");
@@ -718,7 +719,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                           completionHandler:^(NSError *error) {
                               if (imageSize > imageSizeLimit) {
                                   dispatch_async(dispatch_get_main_queue(), ^{
-                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Photo Exceeds the limit"];
+                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
                                                                     [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
                                                                     [self.viewController dismissViewControllerAnimated:YES completion:nil];
                                                                 });
