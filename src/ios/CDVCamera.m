@@ -38,6 +38,8 @@
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
 static NSSet* org_apache_cordova_validArrowDirections;
+NSUInteger imageSizeLimit;
+static const NSString * IMAGE_SIZE_EXCEEDED_ERROR = @"PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
 static NSString* toBase64(NSData* data) {
     SEL s1 = NSSelectorFromString(@"cdv_base64EncodedString");
@@ -88,6 +90,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
     pictureOptions.popoverSupported = NO;
     pictureOptions.usesGeolocation = NO;
+    id sizeLimitArg = [command argumentAtIndex:12];
+    imageSizeLimit = (sizeLimitArg == [NSNull null] || [sizeLimitArg longValue] <= 0) ? 0 : [sizeLimitArg longValue] * 1024 * 1024;
+
 
     return pictureOptions;
 }
@@ -304,7 +309,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
     if([navigationController isKindOfClass:[UIImagePickerController class]]){
-        
+
         // If popoverWidth and popoverHeight are specified and are greater than 0, then set popover size, else use apple's default popoverSize
         NSDictionary* options = self.pickerController.pictureOptions.popoverOptions;
         if(options) {
@@ -315,8 +320,8 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                 [viewController setPreferredContentSize:CGSizeMake(popoverWidth,popoverHeight)];
             }
         }
-        
-        
+
+
         UIImagePickerController* cameraPicker = (UIImagePickerController*)navigationController;
 
         if(![cameraPicker.mediaTypes containsObject:(NSString*)kUTTypeImage]){
@@ -386,11 +391,11 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (NSString*) formatAsDataURI:(NSData*) data withMIME:(NSString*) mime {
     NSString* base64 = toBase64(data);
-    
+
     if (base64 == nil) {
         return nil;
     }
-    
+
     return [NSString stringWithFormat:@"data:%@;base64,%@", mime, base64];
 }
 
@@ -398,7 +403,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     NSString* mime = nil;
     NSData* data = [self processImage: image info: info options: options outMime: &mime];
-    
+
     return [self formatAsDataURI: data withMIME: mime];
 }
 
@@ -476,8 +481,8 @@ static NSString* MIME_JPEG    = @"image/jpeg";
         default:
             break;
     };
-    
-    
+
+
     return data;
 }
 
@@ -581,6 +586,11 @@ static NSString* MIME_JPEG    = @"image/jpeg";
     UIImage* scaledImage = nil;
 
     if ((options.targetSize.width > 0) && (options.targetSize.height > 0)) {
+        CGSize imageSize = image.size;
+        if (imageSize.width <= options.targetSize.width && imageSize.height <= options.targetSize.height) {
+            // Image is already smaller than target size, no need to scale
+            return image;
+        }
         // if cropToSize, resize image and crop to target size, otherwise resize to fit target without cropping
         if (options.cropToSize) {
             scaledImage = [image imageByScalingAndCroppingForSize:options.targetSize];
@@ -612,9 +622,14 @@ static NSString* MIME_JPEG    = @"image/jpeg";
         {
             image = [self retrieveImage:info options:options];
             NSData* data = [self processImage:image info:info options:options];
-            
+
             if (data) {
                 if (pickerController.sourceType == UIImagePickerControllerSourceTypePhotoLibrary) {
+                    NSURL* imageURL = [info objectForKey:UIImagePickerControllerImageURL];
+                    NSString* ext = [[imageURL pathExtension] lowercaseString];
+                    if([ext isEqualToString:@"png"]){
+                       options.encodingType = EncodingTypePNG;
+                    }
                     NSMutableData *imageDataWithExif = [NSMutableData data];
                     if (self.metadata) {
                         CGImageSourceRef sourceImage = CGImageSourceCreateWithData((__bridge CFDataRef)self.data, NULL);
@@ -641,7 +656,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                     else {
                         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[self urlTransformer:[NSURL fileURLWithPath:filePath]] absoluteString]];
                     }
-                    
+
                 } else if (pickerController.sourceType != UIImagePickerControllerSourceTypeCamera || !options.usesGeolocation) {
                     // No need to save file if usesGeolocation is true since it will be saved after the location is tracked
                     NSString* extension = options.encodingType == EncodingTypePNG? @"png" : @"jpg";
@@ -689,6 +704,32 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
+  if(imageSizeLimit > 0){
+    PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
+    if (phAsset) {
+        NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
+        PHAssetResource *resource = [resources firstObject];
+
+        __block long long imageSize = 0;
+        PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
+
+        [manager requestDataForAssetResource:resource
+                                     options:nil
+                            dataReceivedHandler:^(NSData *data) {
+                                imageSize += data.length;
+                            }
+                          completionHandler:^(NSError *error) {
+                              if (imageSize > imageSizeLimit) {
+                                  dispatch_async(dispatch_get_main_queue(), ^{
+                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
+                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
+                                                                    [self.viewController dismissViewControllerAnimated:YES completion:nil];
+                                                                });
+                                  return;
+                              }
+                        }];
+      }
+  }
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
     __weak CDVCamera* weakSelf = self;
 
@@ -840,7 +881,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     CDVPictureOptions* options = self.pickerController.pictureOptions;
     CDVPluginResult* result = nil;
-   
+
     NSMutableData *imageDataWithExif = [NSMutableData data];
 
     if (self.metadata) {
