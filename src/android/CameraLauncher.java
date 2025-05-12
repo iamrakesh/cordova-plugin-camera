@@ -100,6 +100,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private static final String GET_All = "Get All";
     private static final String CROPPED_URI_KEY = "croppedUri";
     private static final String IMAGE_URI_KEY = "imageUri";
+    private static final String IMAGE_SIZE_EXCEEDED_ERROR = "PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
     private static final String TAKE_PICTURE_ACTION = "takePicture";
 
@@ -111,6 +112,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     //Where did this come from?
     private static final int CROP_CAMERA = 100;
+    private long imageSizeLimit;
 
     private static final String TIME_FORMAT = "yyyyMMdd_HHmmss";
 
@@ -172,6 +174,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             this.allowEdit = args.getBoolean(7);
             this.correctOrientation = args.getBoolean(8);
             this.saveToPhotoAlbum = args.getBoolean(9);
+            this.imageSizeLimit = args.get(12).toString().equals("null") || args.getLong(12) <= 0 ? 0 : args.getLong(12) * 1024 * 1024;
 
             // If the user specifies a 0 or smaller width/height
             // make it -1 so later comparisons succeed
@@ -729,6 +732,31 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         return this.encodingType == JPEG ? JPEG_EXTENSION : PNG_EXTENSION;
     }
 
+    /**
+   * Retrieves the size of the image (or file) pointed to by the given URI.
+   *
+   * <p>This method uses the ContentResolver to query metadata about the file,
+   *
+   * @param uri The {@link android.net.Uri} pointing to the image or file.
+   * @return The size of the file in bytes, or -1 if the size could not be determined
+   *         (e.g., the URI is null, the size column is not available, or an error occurs).
+   */
+     private long getImageSize(Uri uri) {
+        if (uri == null) return -1;
+
+        try (Cursor returnCursor = cordova.getActivity().getContentResolver().query(uri, null, null, null, null)) {
+            if (returnCursor != null && returnCursor.moveToFirst()) {
+                int sizeIndex = returnCursor.getColumnIndex(OpenableColumns.SIZE);
+                if (sizeIndex != -1 && !returnCursor.isNull(sizeIndex)) {
+                    return returnCursor.getLong(sizeIndex);
+                }
+            }
+        } catch (Exception e) {
+            LOG.e("FileSizeCheck", "Error getting file size for URI: " + uri, e);
+        }
+
+        return -1; // Return -1 to indicate failure
+    }
 
     /**
      * Applies all needed transformation to the image received from the gallery.
@@ -738,6 +766,19 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
+
+       if(imageSizeLimit > 0) {
+            long imageSize = getImageSize(uri);
+            if (imageSize == -1) {
+                this.failPicture("Unable to retrieve Image Properties");
+                return;
+            }
+            if (imageSize > imageSizeLimit) {
+                this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+                return;
+            }
+        }
+
         if (uri == null) {
             if (croppedUri != null) {
                 uri = croppedUri;
@@ -749,6 +790,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
         String uriString = uri.toString();
         String mimeTypeOfGalleryFile = FileHelper.getMimeType(uriString, this.cordova);
+        if(mimeTypeOfGalleryFile.equalsIgnoreCase(PNG_MIME_TYPE)){
+            this.encodingType = PNG;
+        }
         InputStream input;
         try {
             input = cordova.getActivity().getContentResolver().openInputStream(uri);
@@ -1042,15 +1086,16 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
-        if (this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation)) {
-            Bitmap image = null;
-            try {
-                image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
-            } catch (OutOfMemoryError e) {
-                callbackContext.error(e.getLocalizedMessage());
-            } catch (Exception e) {
-                callbackContext.error(e.getLocalizedMessage());
-            }
+        Bitmap image = null;
+        try(InputStream imageFileStream = FileHelper.getInputStreamFromUriString(imageUrl, cordova)) {
+            image = BitmapFactory.decodeStream(imageFileStream);
+        }  catch (OutOfMemoryError e) {
+            callbackContext.error(e.getLocalizedMessage());
+        } catch (Exception e){
+            callbackContext.error(e.getLocalizedMessage());
+        }
+
+        if ((this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation)) || ((image!=null && image.getWidth() <= this.targetWidth && image.getHeight() <= this.targetHeight))) {
             return image;
         }
 

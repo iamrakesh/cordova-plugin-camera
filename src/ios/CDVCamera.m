@@ -38,6 +38,8 @@
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
 static NSSet* org_apache_cordova_validArrowDirections;
+NSUInteger imageSizeLimit;
+static const NSString * IMAGE_SIZE_EXCEEDED_ERROR = @"PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
 static NSString* toBase64(NSData* data)
 {
@@ -89,6 +91,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
     pictureOptions.popoverSupported = NO;
     pictureOptions.usesGeolocation = NO;
+    id sizeLimitArg = [command argumentAtIndex:12];
+    imageSizeLimit = (sizeLimitArg == [NSNull null] || [sizeLimitArg longValue] <= 0) ? 0 : [sizeLimitArg longValue] * 1024 * 1024;
+
 
     return pictureOptions;
 }
@@ -144,7 +149,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 /**
  Called by JS function navigator.camera.getPicture(cameraSuccess, cameraError, cameraOptions)
  which will invoke the camera or photo picker to capture or select an image or video.
- 
+
  @param command A Cordova command whose arguments map to camera options:
    - index 0 (quality): NSNumber (1–100). JPEG quality when encodingType is JPEG. Default: 50.
    - index 1 (destinationType): NSNumber (DestinationType). File URI or Data URL. Default: File URI.
@@ -184,7 +189,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                                                 callbackId:command.callbackId];
                 return;
             }
-            
+
             // Validate the app has permission to access the camera
             [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
                  // Show an alert if not granted
@@ -195,14 +200,14 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                      [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
                  }
              }];
-            
+
             // A photo should be picked from the photo library
         } else {
             // Use PHPickerViewController on iOS 14+
             // Doesn't require permissions
             if (@available(iOS 14, *)) {
                     [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
-                
+
                 // On iOS < 14, use UIImagePickerController and request permissions
             } else {
                 // Request permission
@@ -228,22 +233,22 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 - (void)presentPermissionDeniedAlertWithMessage:(NSString*)message callbackId:(NSString*)callbackId
 {
     dispatch_async(dispatch_get_main_queue(), ^{
-        
+
         NSString *bundleDisplayName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDisplayName"];
         UIAlertController *alertController = [UIAlertController alertControllerWithTitle:bundleDisplayName
                                                                                  message:NSLocalizedString(message, nil)
                                                                           preferredStyle:UIAlertControllerStyleAlert];
-        
+
         // Add buttons
         __weak CDVCamera *weakSelf = self;
-        
+
         // Ok button
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
                                                             style:UIAlertActionStyleDefault
                                                           handler:^(UIAlertAction * _Nonnull action) {
             [weakSelf sendNoPermissionResult:callbackId];
         }]];
-        
+
         // Button for open settings
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Settings", nil)
                                                             style:UIAlertActionStyleDefault
@@ -270,19 +275,19 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 /**
  Presents the appropriate UI to capture or select media based on the provided options and OS version.
- 
+
  On iOS 14 and later, when the source type is PHOTOLIBRARY (or SAVEDPHOTOALBUM), this method presents
  PHPickerViewController to select media without requiring Photos authorization. Otherwise, it falls back
  to UIImagePickerController for camera usage or on older iOS versions.
- 
+
  Threading:
  - Ensures presentation occurs on the main thread.
- 
+
  Behavior:
  - Dismisses any visible popover before presenting a new picker (iPad).
  - Configures delegates, media types, and popover presentation as needed.
  - Updates `hasPendingOperation` to reflect plugin activity state.
- 
+
  @param callbackId The Cordova callback identifier used to deliver results back to JavaScript.
  @param pictureOptions Parsed camera options (sourceType, mediaType, allowsEditing, popoverOptions, etc.).
  */
@@ -300,7 +305,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                 return;
             }
         }
-        
+
         // Use UIImagePickerController for camera or as image picker for iOS older than 14
         CDVCameraPicker* cameraPicker = [CDVCameraPicker createFromPictureOptions:pictureOptions];
         self.pickerController = cameraPicker;
@@ -339,16 +344,16 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 - (void)showPHPicker:(NSString*)callbackId withOptions:(CDVPictureOptions*)pictureOptions API_AVAILABLE(ios(14))
 {
     PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
-    
+
     // Configure filter based on media type
     // Images
     if (pictureOptions.mediaType == MediaTypePicture) {
         config.filter = [PHPickerFilter imagesFilter];
-        
+
         // Videos
     } else if (pictureOptions.mediaType == MediaTypeVideo) {
         config.filter = [PHPickerFilter videosFilter];
-        
+
         // Images and videos
     } else if (pictureOptions.mediaType == MediaTypeAll) {
         config.filter = [PHPickerFilter anyFilterMatchingSubfilters:@[
@@ -356,20 +361,20 @@ static NSString* MIME_JPEG    = @"image/jpeg";
             [PHPickerFilter videosFilter]
         ]];
     }
-    
+
     config.selectionLimit = 1;
     config.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
-    
+
     PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
     picker.delegate = self;
-    
+
     // Store callback ID and options in picker with objc_setAssociatedObject
     // PHPickerViewController’s delegate method picker:didFinishPicking: only gives you back the picker instance
     // and the results array. It doesn’t carry arbitrary context. By associating the callbackId and pictureOptions
     // with the picker, you can retrieve them later inside the delegate method
     objc_setAssociatedObject(picker, "callbackId", callbackId, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(picker, "pictureOptions", pictureOptions, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    
+
     [self.viewController presentViewController:picker animated:YES completion:^{
         self.hasPendingOperation = NO;
     }];
@@ -380,9 +385,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     NSString *callbackId = objc_getAssociatedObject(picker, "callbackId");
     CDVPictureOptions *pictureOptions = objc_getAssociatedObject(picker, "pictureOptions");
-    
+
     __weak CDVCamera* weakSelf = self;
-    
+
     [picker dismissViewControllerAnimated:YES completion:^{
         if (results.count == 0) {
             // User cancelled
@@ -391,9 +396,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
             weakSelf.hasPendingOperation = NO;
             return;
         }
-        
+
         PHPickerResult *pickerResult = results.firstObject;
-        
+
         // Check if it's a video
         if ([pickerResult.itemProvider hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
             [pickerResult.itemProvider loadFileRepresentationForTypeIdentifier:UTTypeMovie.identifier completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
@@ -403,7 +408,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                     weakSelf.hasPendingOperation = NO;
                     return;
                 }
-                
+
                 dispatch_async(dispatch_get_main_queue(), ^{
                     NSString* videoPath = [weakSelf createTmpVideo:[url path]];
                     CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:videoPath];
@@ -411,7 +416,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                     weakSelf.hasPendingOperation = NO;
                 });
             }];
-            
+
             // Handle image
         } else if ([pickerResult.itemProvider canLoadObjectOfClass:[UIImage class]]) {
             [pickerResult.itemProvider loadObjectOfClass:[UIImage class] completionHandler:^(__kindof id<NSItemProviderReading>  _Nullable object, NSError * _Nullable error) {
@@ -421,12 +426,12 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                     weakSelf.hasPendingOperation = NO;
                     return;
                 }
-                
+
                 UIImage *image = (UIImage *)object;
-                
+
                 // Get asset identifier to fetch metadata
                 NSString *assetIdentifier = pickerResult.assetIdentifier;
-                
+
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [weakSelf processPHPickerImage:image assetIdentifier:assetIdentifier callbackId:callbackId options:pictureOptions];
                 });
@@ -441,17 +446,17 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                      options:(CDVPictureOptions*)options API_AVAILABLE(ios(14))
 {
     __weak CDVCamera* weakSelf = self;
-    
+
     // Fetch metadata if asset identifier is available
     if (assetIdentifier) {
         PHFetchResult *result = [PHAsset fetchAssetsWithLocalIdentifiers:@[assetIdentifier] options:nil];
         PHAsset *asset = result.firstObject;
-        
+
         if (asset) {
             PHImageRequestOptions *imageOptions = [[PHImageRequestOptions alloc] init];
             imageOptions.synchronous = YES;
             imageOptions.networkAccessAllowed = YES;
-            
+
             [[PHImageManager defaultManager] requestImageDataAndOrientationForAsset:asset
                                                                             options:imageOptions
                                                                       resultHandler:^(NSData *_Nullable imageData, NSString *_Nullable dataUTI, CGImagePropertyOrientation orientation, NSDictionary *_Nullable info) {
@@ -463,7 +468,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
             return;
         }
     }
-    
+
     // No metadata available
     [self finalizePHPickerImage:image metadata:nil callbackId:callbackId options:options];
 }
@@ -475,11 +480,11 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     // Process image according to options
     UIImage *processedImage = image;
-    
+
     if (options.correctOrientation) {
         processedImage = [processedImage imageCorrectedForCaptureOrientation];
     }
-    
+
     if ((options.targetSize.width > 0) && (options.targetSize.height > 0)) {
         if (options.cropToSize) {
             processedImage = [processedImage imageByScalingAndCroppingForSize:options.targetSize];
@@ -487,36 +492,36 @@ static NSString* MIME_JPEG    = @"image/jpeg";
             processedImage = [processedImage imageByScalingNotCroppingForSize:options.targetSize];
         }
     }
-    
+
     // Create info dictionary similar to UIImagePickerController
     NSMutableDictionary *info = [NSMutableDictionary dictionary];
     [info setObject:processedImage forKey:UIImagePickerControllerOriginalImage];
     if (metadata) {
         [info setObject:metadata forKey:@"UIImagePickerControllerMediaMetadata"];
     }
-    
+
     // Store metadata for processing
     if (metadata) {
         self.metadata = [[NSMutableDictionary alloc] init];
-        
+
         NSMutableDictionary* EXIFDictionary = [[metadata objectForKey:(NSString*)kCGImagePropertyExifDictionary] mutableCopy];
         if (EXIFDictionary) {
             [self.metadata setObject:EXIFDictionary forKey:(NSString*)kCGImagePropertyExifDictionary];
         }
-        
+
         NSMutableDictionary* TIFFDictionary = [[metadata objectForKey:(NSString*)kCGImagePropertyTIFFDictionary] mutableCopy];
         if (TIFFDictionary) {
             [self.metadata setObject:TIFFDictionary forKey:(NSString*)kCGImagePropertyTIFFDictionary];
         }
-        
+
         NSMutableDictionary* GPSDictionary = [[metadata objectForKey:(NSString*)kCGImagePropertyGPSDictionary] mutableCopy];
         if (GPSDictionary) {
             [self.metadata setObject:GPSDictionary forKey:(NSString*)kCGImagePropertyGPSDictionary];
         }
     }
-    
+
     __weak CDVCamera* weakSelf = self;
-    
+
     // Process and return result
     [self resultForImage:options info:info completion:^(CDVPluginResult* res) {
         [weakSelf.commandDelegate sendPluginResult:res callbackId:callbackId];
@@ -584,16 +589,16 @@ static NSString* MIME_JPEG    = @"image/jpeg";
         // If popoverWidth and popoverHeight are specified and are greater than 0,
         // then set popover size, else use apple's default popoverSize
         NSDictionary* options = self.pickerController.pictureOptions.popoverOptions;
-        
+
         if(options) {
             NSInteger popoverWidth = [self integerValueForKey:options key:@"popoverWidth" defaultValue:0];
             NSInteger popoverHeight = [self integerValueForKey:options key:@"popoverHeight" defaultValue:0];
-            
+
             if(popoverWidth > 0 && popoverHeight > 0) {
                 [viewController setPreferredContentSize:CGSizeMake(popoverWidth,popoverHeight)];
             }
         }
-        
+
         UIImagePickerController* imagePicker = (UIImagePickerController*)navigationController;
 
         // Set "Videos" title if mediaType is not for images
@@ -666,11 +671,11 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 - (NSString*)formatAsDataURI:(NSData*)data withMIME:(NSString*)mime
 {
     NSString* base64 = toBase64(data);
-    
+
     if (base64 == nil) {
         return nil;
     }
-    
+
     return [NSString stringWithFormat:@"data:%@;base64,%@", mime, base64];
 }
 
@@ -678,7 +683,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     NSString* mime = nil;
     NSData* data = [self processImage:image info:info options:options outMime:&mime];
-    
+
     return [self formatAsDataURI:data withMIME:mime];
 }
 
@@ -756,8 +761,8 @@ static NSString* MIME_JPEG    = @"image/jpeg";
         default:
             break;
     };
-    
-    
+
+
     return data;
 }
 
@@ -870,6 +875,11 @@ static NSString* MIME_JPEG    = @"image/jpeg";
     UIImage* scaledImage = nil;
 
     if ((options.targetSize.width > 0) && (options.targetSize.height > 0)) {
+        CGSize imageSize = image.size;
+        if (imageSize.width <= options.targetSize.width && imageSize.height <= options.targetSize.height) {
+            // Image is already smaller than target size, no need to scale
+            return image;
+        }
         // if cropToSize, resize image and crop to target size, otherwise resize to fit target without cropping
         if (options.cropToSize) {
             scaledImage = [image imageByScalingAndCroppingForSize:options.targetSize];
@@ -903,9 +913,14 @@ static NSString* MIME_JPEG    = @"image/jpeg";
         {
             image = [self retrieveImage:info options:options];
             NSData* data = [self processImage:image info:info options:options];
-            
+
             if (data) {
                 if (pickerController.sourceType == UIImagePickerControllerSourceTypePhotoLibrary) {
+                    NSURL* imageURL = [info objectForKey:UIImagePickerControllerImageURL];
+                    NSString* ext = [[imageURL pathExtension] lowercaseString];
+                    if([ext isEqualToString:@"png"]){
+                       options.encodingType = EncodingTypePNG;
+                    }
                     NSMutableData *imageDataWithExif = [NSMutableData data];
                     if (self.metadata) {
                         CGImageSourceRef sourceImage = CGImageSourceCreateWithData((__bridge CFDataRef)self.data, NULL);
@@ -932,7 +947,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                     else {
                         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[self urlTransformer:[NSURL fileURLWithPath:filePath]] absoluteString]];
                     }
-                    
+
                 } else if (pickerController.sourceType != UIImagePickerControllerSourceTypeCamera || !options.usesGeolocation) {
                     // No need to save file if usesGeolocation is true since it will be saved after the location is tracked
                     NSString* extension = options.encodingType == EncodingTypePNG? @"png" : @"jpg";
@@ -983,6 +998,32 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
+  if(imageSizeLimit > 0){
+    PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
+    if (phAsset) {
+        NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
+        PHAssetResource *resource = [resources firstObject];
+
+        __block long long imageSize = 0;
+        PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
+
+        [manager requestDataForAssetResource:resource
+                                     options:nil
+                            dataReceivedHandler:^(NSData *data) {
+                                imageSize += data.length;
+                            }
+                          completionHandler:^(NSError *error) {
+                              if (imageSize > imageSizeLimit) {
+                                  dispatch_async(dispatch_get_main_queue(), ^{
+                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
+                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
+                                                                    [self.viewController dismissViewControllerAnimated:YES completion:nil];
+                                                                });
+                                  return;
+                              }
+                        }];
+      }
+  }
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
     __weak CDVCamera* weakSelf = self;
 
@@ -1142,7 +1183,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 {
     CDVPictureOptions* options = self.pickerController.pictureOptions;
     CDVPluginResult* result = nil;
-   
+
     NSMutableData *imageDataWithExif = [NSMutableData data];
 
     if (self.metadata) {
