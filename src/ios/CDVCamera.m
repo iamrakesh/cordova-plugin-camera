@@ -38,7 +38,7 @@
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
 static NSSet* org_apache_cordova_validArrowDirections;
-NSUInteger IMAGE_SIZE_LIMIT= (20 * 1024 * 1024);
+NSUInteger imageSizeLimit;
 static const NSString * IMAGE_SIZE_EXCEEDED_ERROR = @"PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
 static NSString* toBase64(NSData* data) {
@@ -90,7 +90,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
     pictureOptions.popoverSupported = NO;
     pictureOptions.usesGeolocation = NO;
-    IMAGE_SIZE_LIMIT = [[command argumentAtIndex:12]longValue] * 1024 * 1024;
+    id sizeLimitArg = [command argumentAtIndex:12];
+    imageSizeLimit = (sizeLimitArg == [NSNull null] || [sizeLimitArg longValue] <= 0) ? 0 : [sizeLimitArg longValue] * 1024 * 1024;
+
 
     return pictureOptions;
 }
@@ -702,7 +704,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
-
+  if(imageSizeLimit > 0){
     PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
     if (phAsset) {
         NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
@@ -727,6 +729,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                               }
                         }];
       }
+  }
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
     __weak CDVCamera* weakSelf = self;
 
