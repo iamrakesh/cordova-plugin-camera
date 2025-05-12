@@ -111,7 +111,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     //Where did this come from?
     private static final int CROP_CAMERA = 100;
-    private long IMAGE_SIZE_LIMIT = (20 * 1024 * 1024);
+    private long imageSizeLimit;
 
     private static final String TIME_FORMAT = "yyyyMMdd_HHmmss";
 
@@ -173,7 +173,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             this.allowEdit = args.getBoolean(7);
             this.correctOrientation = args.getBoolean(8);
             this.saveToPhotoAlbum = args.getBoolean(9);
-            this.IMAGE_SIZE_LIMIT = args.getLong(12) * 1024 * 1024;
+            this.imageSizeLimit = args.get(12).toString().equals("null") || args.getLong(12) <= 0 ? 0 : args.getLong(12) * 1024 * 1024;
 
             // If the user specifies a 0 or smaller width/height
             // make it -1 so later comparisons succeed
@@ -759,14 +759,16 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
 
-        long imageSize = getImageSize(uri);
-        if(imageSize == -1){
-            this.failPicture("Unable to retrieve Image Properties for provided URL");
-            return;
-        }
-        if(imageSize > IMAGE_SIZE_LIMIT){
-            this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
-            return;
+       if(imageSizeLimit > 0) {
+            long imageSize = getImageSize(uri);
+            if (imageSize == -1) {
+                this.failPicture("Unable to retrieve Image Properties");
+                return;
+            }
+            if (imageSize > imageSizeLimit) {
+                this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+                return;
+            }
         }
 
         if (uri == null) {
