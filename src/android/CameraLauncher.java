@@ -1079,8 +1079,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
         Bitmap image = null;
-        try(InputStream imageFileStream = FileHelper.getInputStreamFromUriString(imageUrl, cordova)) {
-            image = BitmapFactory.decodeStream(imageFileStream);
+        try {
+            image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
         }  catch (OutOfMemoryError e) {
             callbackContext.error(e.getLocalizedMessage());
         } catch (Exception e){
