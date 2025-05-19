@@ -875,11 +875,6 @@ static NSString* MIME_JPEG    = @"image/jpeg";
     UIImage* scaledImage = nil;
 
     if ((options.targetSize.width > 0) && (options.targetSize.height > 0)) {
-        CGSize imageSize = image.size;
-        if (imageSize.width <= options.targetSize.width && imageSize.height <= options.targetSize.height) {
-            // Image is already smaller than target size, no need to scale
-            return image;
-        }
         // if cropToSize, resize image and crop to target size, otherwise resize to fit target without cropping
         if (options.cropToSize) {
             scaledImage = [image imageByScalingAndCroppingForSize:options.targetSize];
