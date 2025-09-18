@@ -402,17 +402,70 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 - (NSString*) processImageAsDataUri:(UIImage*) image info:(NSDictionary*) info options:(CDVPictureOptions*) options
 {
     NSString* mime = nil;
-    NSData* data = [self processImage: image info: info options: options outMime: &mime];
+    NSData* data = [self processImage: image info: info options: options outMime: &mime error: nil];
 
     return [self formatAsDataURI: data withMIME: mime];
 }
 
 - (NSData*) processImage:(UIImage*) image info:(NSDictionary*) info options:(CDVPictureOptions*) options
 {
-    return [self processImage:image  info: info options: options outMime: nil];
+    return [self processImage:image  info: info options: options outMime: nil error: nil];
 }
 
-- (NSData*) processImage:(UIImage*)image info:(NSDictionary*)info options:(CDVPictureOptions*)options outMime:(NSString**) outMime
+/**
+ * Compresses an image by progressively reducing JPEG quality until the size constraint is met.
+ *
+ * Process:
+ * - Start with the quality specified in options (default = 100% if not set).
+ * - If a maxSizeBytes limit is provided (> 0), repeatedly compress with lower quality
+ *   (reduce by 10% each attempt) until the image fits within the limit or attempts are exhausted.
+ * - Compression stops after 3 attempts or when quality reaches 0.
+ *
+ * Behavior:
+ * - If the image meets the size limit within the attempts, the compressed data is returned.
+ * - If it cannot be compressed under the limit, returns nil and sets an error.
+ * - If no size limit is provided, compress once at the specified quality.
+ *
+ * @param image         The UIImage to compress.
+ * @param options       Picture options containing quality (0–100).
+ * @param maxSizeBytes  Maximum allowed size in bytes (0 means no limit).
+ * @param error         Pointer to an NSError set if compression fails due to size constraints.
+ * @return              NSData containing the compressed JPEG, or nil if size limit is not met.
+ */
+- (NSData*) compressImageToSizeLimit:(UIImage*)image options:(CDVPictureOptions*)options maxSizeBytes:(long)maxSizeBytes error:(NSError**)error
+{
+    NSData* data = nil;
+    // Start with quality from options, default to 100%  (1.0f) if not provided
+    float quality = (options.quality && [options.quality floatValue] > 0) ? ([options.quality floatValue] / 100.0f) : 1.0f;
+    int attempts = 0;
+
+        // Use recursive compression with quality reduction only if size limit is set
+        if (maxSizeBytes > 0) {
+            while (quality > 0.0f && attempts < 3) {
+                data = UIImageJPEGRepresentation(image, quality);
+                // If we're within the limit, return the compressed data
+                if ([data length] <= maxSizeBytes) {
+                    return data;
+                }
+                // Reduce quality by 0.1 (10%) for next iteration
+                quality -= 0.1f;
+                attempts++;
+            }
+
+             // If still too large after attempts, return nil and set error
+            if([data length] > maxSizeBytes ) {
+                data = nil;
+                *error = [NSError errorWithDomain:@"" code:0 userInfo:@{NSLocalizedDescriptionKey : IMAGE_SIZE_EXCEEDED_ERROR}];
+            }
+    } else {
+        // No size limit, just compress with the specified quality
+        data = UIImageJPEGRepresentation(image, quality);
+    }
+
+    return data;
+}
+
+- (NSData*) processImage:(UIImage*)image info:(NSDictionary*)info options:(CDVPictureOptions*)options outMime:(NSString**)  outMime  error:(NSError**)error
 {
     NSData* data = nil;
 
@@ -428,7 +481,10 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                 // use image unedited as requested , don't resize
                 data = UIImageJPEGRepresentation(image, 1.0);
             } else {
-                data = UIImageJPEGRepresentation(image, [options.quality floatValue] / 100.0f);
+                data = [self compressImageToSizeLimit:image options:options maxSizeBytes:imageSizeLimit error:error];
+                if (*error) {
+                  return nil;
+                }
             }
 
             if (pickerController.sourceType == UIImagePickerControllerSourceTypeCamera) {
@@ -615,8 +671,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
             break;
         default: // DestinationTypeFileUri
         {
+            NSError* error = nil;
             image = [self retrieveImage:info options:options];
-            NSData* data = [self processImage:image info:info options:options];
+            NSData* data = [self processImage:image info:info options:options outMime: nil error:&error];
 
             if (data) {
                 if (pickerController.sourceType == UIImagePickerControllerSourceTypePhotoLibrary) {
@@ -667,6 +724,9 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                 }
 
             }
+            else if (error && [error.localizedDescription isEqualToString:IMAGE_SIZE_EXCEEDED_ERROR]) {
+                  result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
+            }
         }
             break;
     };
@@ -699,32 +759,6 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
-  if(imageSizeLimit > 0){
-    PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
-    if (phAsset) {
-        NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
-        PHAssetResource *resource = [resources firstObject];
-
-        __block long long imageSize = 0;
-        PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
-
-        [manager requestDataForAssetResource:resource
-                                     options:nil
-                            dataReceivedHandler:^(NSData *data) {
-                                imageSize += data.length;
-                            }
-                          completionHandler:^(NSError *error) {
-                              if (imageSize > imageSizeLimit) {
-                                  dispatch_async(dispatch_get_main_queue(), ^{
-                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
-                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
-                                                                    [self.viewController dismissViewControllerAnimated:YES completion:nil];
-                                                                });
-                                  return;
-                              }
-                        }];
-      }
-  }
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
     __weak CDVCamera* weakSelf = self;
 
