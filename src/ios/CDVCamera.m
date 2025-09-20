@@ -440,7 +440,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
     int attempts = 0;
 
         // Use recursive compression with quality reduction only if size limit is set
-        if (maxSizeBytes > 0) {
+        if (maxSizeBytes > 0 && quality < 1.0f) {
             while (quality > 0.0f && attempts < 3) {
                 data = UIImageJPEGRepresentation(image, quality);
                 // If we're within the limit, return the compressed data

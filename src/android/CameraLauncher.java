@@ -768,12 +768,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         int quality = (mQuality > 0) ? mQuality : 100;
 
           // PNG ignores quality, just compress once
-        if (encodingType == PNG) {
-            bitmap.compress(compressFormat, mQuality, dataStream);
-            return dataStream.toByteArray();
-        }
-
-        if (maxSizeBytes <= 0) {
+          // Also, if no size limit or max quality, just compress once
+        if (encodingType == PNG || maxSizeBytes <= 0 || quality == 100) {
             bitmap.compress(compressFormat, quality, dataStream);
             return dataStream.toByteArray();
         }
@@ -794,37 +790,11 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
         // Final check after loop in case last attempt meets requirement
         byte[] finalBytes = dataStream.toByteArray();
-        if (finalBytes != null && maxSizeBytes > 0 && finalBytes.length <= maxSizeBytes) {
+        if (finalBytes != null && finalBytes.length <= maxSizeBytes) {
             return finalBytes;
         }
 
         return null;
-    }
-
-    /**
-   * Retrieves the size of the image (or file) pointed to by the given URI.
-   *
-   * <p>This method uses the ContentResolver to query metadata about the file,
-   *
-   * @param uri The {@link android.net.Uri} pointing to the image or file.
-   * @return The size of the file in bytes, or -1 if the size could not be determined
-   *         (e.g., the URI is null, the size column is not available, or an error occurs).
-   */
-     private long getImageSize(Uri uri) {
-        if (uri == null) return -1;
-
-        try (Cursor returnCursor = cordova.getActivity().getContentResolver().query(uri, null, null, null, null)) {
-            if (returnCursor != null && returnCursor.moveToFirst()) {
-                int sizeIndex = returnCursor.getColumnIndex(OpenableColumns.SIZE);
-                if (sizeIndex != -1 && !returnCursor.isNull(sizeIndex)) {
-                    return returnCursor.getLong(sizeIndex);
-                }
-            }
-        } catch (Exception e) {
-            LOG.e("FileSizeCheck", "Error getting file size for URI: " + uri, e);
-        }
-
-        return -1; // Return -1 to indicate failure
     }
 
     /**
