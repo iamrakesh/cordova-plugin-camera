@@ -685,21 +685,11 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
 
     private String outputModifiedBitmap(Bitmap bitmap, Uri uri, String mimeTypeOfOriginalFile) throws IOException {
-        // Some content: URIs do not map to file paths (e.g. picasa).
-        String realPath = FileHelper.getRealPath(uri, this.cordova);
-        String fileName = calculateModifiedBitmapOutputFileName(mimeTypeOfOriginalFile, realPath);
-
-        String modifiedPath = getTempDirectoryPath() + "/" + fileName;
-
-        OutputStream os = new FileOutputStream(modifiedPath);
-        byte[] compressed = compressImageToSizeLimit(bitmap, this.encodingType, imageSizeLimit);
-        if (compressed == null) {
-            os.close();
-            this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+        String modifiedPath = writeCompressedBitmapToFile(bitmap, uri, mimeTypeOfOriginalFile);
+        if (modifiedPath == null) {
+            exifData = null;
             return null;
         }
-        os.write(compressed);
-        os.close();
 
         if (exifData != null && this.encodingType == JPEG) {
             try {
@@ -713,6 +703,38 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 e.printStackTrace();
             }
         }
+        return modifiedPath;
+    }
+
+    /**
+     * Compresses the given bitmap to respect the configured size limit and writes it to a temporary file.
+     *
+     * The output file name is derived from the original file's MIME type and path.
+     * If the image cannot be compressed within the allowed size, the method signals failure
+     * and no file is written.
+     *
+     * @param bitmap the bitmap image to be compressed and written
+     * @param uri the URI of the original image, used to resolve its real file path
+     * @param mimeTypeOfOriginalFile the MIME type of the original file (e.g. "image/jpeg", "image/png")
+     * @return the absolute path to the written compressed file, or {@code null} if compression failed
+     * @throws IOException if an I/O error occurs while writing the file
+     */
+    private String writeCompressedBitmapToFile(Bitmap bitmap, Uri uri, String mimeTypeOfOriginalFile) throws IOException {
+        // Some content: URIs do not map to file paths (e.g. picasa).
+        String realPath = FileHelper.getRealPath(uri, this.cordova);
+        String fileName = calculateModifiedBitmapOutputFileName(mimeTypeOfOriginalFile, realPath);
+
+        String modifiedPath = getTempDirectoryPath() + "/" + fileName;
+
+        try (OutputStream os = new FileOutputStream(modifiedPath)) {
+            byte[] compressed = compressImageToSizeLimit(bitmap, this.encodingType, imageSizeLimit);
+            if (compressed == null) {
+                this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+                return null;
+            }
+            os.write(compressed);
+        }
+
         return modifiedPath;
     }
 
@@ -757,7 +779,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      * - Caller must handle null return (size constraint not met).
      *
      * @param bitmap        The bitmap to compress.
-     * @param encodingType  The image encoding type (e.g., JPEG, PNG, WEBP).
+     * @param encodingType  The image encoding type (e.g., JPEG, PNG).
      * @param maxSizeBytes  Maximum allowed size in bytes (0 or less means no limit).
      * @return              Compressed image bytes, or null if compression fails to meet maxSizeBytes.
      */
@@ -767,8 +789,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
         int quality = (mQuality > 0) ? mQuality : 100;
 
-          // PNG ignores quality, just compress once
-          // Also, if no size limit or max quality, just compress once
+        // PNG ignores quality, just compress once
+        // Also, if no size limit or max quality, just compress once
         if (encodingType == PNG || maxSizeBytes <= 0 || quality == 100) {
             bitmap.compress(compressFormat, quality, dataStream);
             return dataStream.toByteArray();
@@ -846,9 +868,20 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 // This is a special case to just return the path as no scaling,
                 // rotating, nor compressing needs to be done
                 if (this.targetHeight == -1 && this.targetWidth == -1 &&
-                    destType == FILE_URI && !this.correctOrientation &&
-                    getMimetypeForEncodingType().equalsIgnoreCase(mimeTypeOfGalleryFile)) {
-                    this.callbackContext.success(uriString);
+                        destType == FILE_URI && !this.correctOrientation &&
+                        getMimetypeForEncodingType().equalsIgnoreCase(mimeTypeOfGalleryFile)) {
+
+                    bitmap = createBitmap(data);
+                    // Double-check the bitmap.
+                    if (bitmap == null) {
+                        this.failPicture("Unable to create bitmap!");
+                        return;
+                    }
+                    String modifiedPath = writeCompressedBitmapToFile(bitmap, uri, mimeTypeOfGalleryFile);
+                    if (modifiedPath == null) {
+                        return;
+                    }
+                    this.callbackContext.success("file://" + modifiedPath + "?" + System.currentTimeMillis());
                 } else {
                     try {
                         bitmap = getScaledAndRotatedBitmap(data, mimeTypeOfGalleryFile);
@@ -1107,6 +1140,23 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     }
 
+
+    /**
+     *  Decodes a byte array into a {@link Bitmap}.
+     *
+     * @param data the raw image data to decode
+     * @return a decoded {@link Bitmap} if successful;  {@code null} if decoding fails
+     */
+    private Bitmap createBitmap(byte[] data) {
+        Bitmap image = null;
+        try {
+            image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
+        }  catch (OutOfMemoryError | Exception e) {
+            callbackContext.error(e.getLocalizedMessage());
+        }
+        return image;
+    }
+
     /**
      * Return a scaled and rotated bitmap based on the target width and height
      *
@@ -1117,15 +1167,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
         if ((this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation))) {
-          Bitmap image = null;
-          try {
-              image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
-          }  catch (OutOfMemoryError e) {
-              callbackContext.error(e.getLocalizedMessage());
-          } catch (Exception e){
-              callbackContext.error(e.getLocalizedMessage());
-          }
-          return image;
+            return createBitmap(data);
         }
 
         int rotate = 0;
