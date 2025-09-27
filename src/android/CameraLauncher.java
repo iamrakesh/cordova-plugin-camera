@@ -598,9 +598,13 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
                     // Add compressed version of captured image to returned media store Uri
                     OutputStream os = this.cordova.getActivity().getContentResolver().openOutputStream(uri);
-                    CompressFormat compressFormat = getCompressFormatForEncodingType(encodingType);
-
-                    bitmap.compress(compressFormat, this.mQuality, os);
+                    byte[] compressed = compressImageToSizeLimit(bitmap, this.encodingType, imageSizeLimit);
+                    if (compressed == null) {
+                        os.close();
+                        this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+                        return;
+                    }
+                    os.write(compressed);
                     os.close();
 
                     // Restore exif data to file
@@ -681,17 +685,11 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
 
     private String outputModifiedBitmap(Bitmap bitmap, Uri uri, String mimeTypeOfOriginalFile) throws IOException {
-        // Some content: URIs do not map to file paths (e.g. picasa).
-        String realPath = FileHelper.getRealPath(uri, this.cordova);
-        String fileName = calculateModifiedBitmapOutputFileName(mimeTypeOfOriginalFile, realPath);
-
-        String modifiedPath = getTempDirectoryPath() + "/" + fileName;
-
-        OutputStream os = new FileOutputStream(modifiedPath);
-        CompressFormat compressFormat = getCompressFormatForEncodingType(this.encodingType);
-
-        bitmap.compress(compressFormat, this.mQuality, os);
-        os.close();
+        String modifiedPath = writeCompressedBitmapToFile(bitmap, uri, mimeTypeOfOriginalFile);
+        if (modifiedPath == null) {
+            exifData = null;
+            return null;
+        }
 
         if (exifData != null && this.encodingType == JPEG) {
             try {
@@ -705,6 +703,38 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 e.printStackTrace();
             }
         }
+        return modifiedPath;
+    }
+
+    /**
+     * Compresses the given bitmap to respect the configured size limit and writes it to a temporary file.
+     *
+     * The output file name is derived from the original file's MIME type and path.
+     * If the image cannot be compressed within the allowed size, the method signals failure
+     * and no file is written.
+     *
+     * @param bitmap the bitmap image to be compressed and written
+     * @param uri the URI of the original image, used to resolve its real file path
+     * @param mimeTypeOfOriginalFile the MIME type of the original file (e.g. "image/jpeg", "image/png")
+     * @return the absolute path to the written compressed file, or {@code null} if compression failed
+     * @throws IOException if an I/O error occurs while writing the file
+     */
+    private String writeCompressedBitmapToFile(Bitmap bitmap, Uri uri, String mimeTypeOfOriginalFile) throws IOException {
+        // Some content: URIs do not map to file paths (e.g. picasa).
+        String realPath = FileHelper.getRealPath(uri, this.cordova);
+        String fileName = calculateModifiedBitmapOutputFileName(mimeTypeOfOriginalFile, realPath);
+
+        String modifiedPath = getTempDirectoryPath() + "/" + fileName;
+
+        try (OutputStream os = new FileOutputStream(modifiedPath)) {
+            byte[] compressed = compressImageToSizeLimit(bitmap, this.encodingType, imageSizeLimit);
+            if (compressed == null) {
+                this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
+                return null;
+            }
+            os.write(compressed);
+        }
+
         return modifiedPath;
     }
 
@@ -726,29 +756,67 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     }
 
     /**
-   * Retrieves the size of the image (or file) pointed to by the given URI.
-   *
-   * <p>This method uses the ContentResolver to query metadata about the file,
-   *
-   * @param uri The {@link android.net.Uri} pointing to the image or file.
-   * @return The size of the file in bytes, or -1 if the size could not be determined
-   *         (e.g., the URI is null, the size column is not available, or an error occurs).
-   */
-     private long getImageSize(Uri uri) {
-        if (uri == null) return -1;
+     * Compresses a bitmap to fit within a maximum size constraint (in bytes).
+     *
+     * Behavior:
+     * - If encodingType is PNG:
+     *   - Quality is ignored (as per Android API).
+     *   - Bitmap is compressed once and returned, regardless of maxSizeBytes.
+     *
+     * - If encodingType is not PNG (e.g., JPEG):
+     *   - Starts with quality from mQuality (default = 100 if <= 0).
+     *   - If maxSizeBytes <= 0:
+     *       → Performs a single compress at the initial quality.
+     *   - If maxSizeBytes > 0:
+     *       → Attempts up to 3 compressions, reducing quality by 10 each time,
+     *         until the result is <= maxSizeBytes.
+     *       → Returns the first compressed result that satisfies the size limit.
+     *       → If after all attempts the size is still too large, returns null.
+     *
+     * Notes:
+     * - Max attempts = 3.
+     * - Minimum quality = 0 (loop ends if reached).
+     * - Caller must handle null return (size constraint not met).
+     *
+     * @param bitmap        The bitmap to compress.
+     * @param encodingType  The image encoding type (e.g., JPEG, PNG).
+     * @param maxSizeBytes  Maximum allowed size in bytes (0 or less means no limit).
+     * @return              Compressed image bytes, or null if compression fails to meet maxSizeBytes.
+     */
+    private byte[] compressImageToSizeLimit(Bitmap bitmap, int encodingType, long maxSizeBytes) {
+        ByteArrayOutputStream dataStream = new ByteArrayOutputStream();
+        CompressFormat compressFormat = getCompressFormatForEncodingType(encodingType);
 
-        try (Cursor returnCursor = cordova.getActivity().getContentResolver().query(uri, null, null, null, null)) {
-            if (returnCursor != null && returnCursor.moveToFirst()) {
-                int sizeIndex = returnCursor.getColumnIndex(OpenableColumns.SIZE);
-                if (sizeIndex != -1 && !returnCursor.isNull(sizeIndex)) {
-                    return returnCursor.getLong(sizeIndex);
-                }
-            }
-        } catch (Exception e) {
-            LOG.e("FileSizeCheck", "Error getting file size for URI: " + uri, e);
+        int quality = (mQuality > 0) ? mQuality : 100;
+
+        // PNG ignores quality, just compress once
+        // Also, if no size limit or max quality, just compress once
+        if (encodingType == PNG || maxSizeBytes <= 0 || quality == 100) {
+            bitmap.compress(compressFormat, quality, dataStream);
+            return dataStream.toByteArray();
         }
 
-        return -1; // Return -1 to indicate failure
+        int attempts = 0;
+        while (attempts < 3 && quality > 0) {
+            dataStream.reset();
+            if (!bitmap.compress(compressFormat, quality, dataStream)) {
+                break;
+            }
+            byte[] bytes = dataStream.toByteArray();
+            if (bytes.length <= maxSizeBytes) {
+                return bytes;
+            }
+            quality -= 10;
+            attempts++;
+        }
+
+        // Final check after loop in case last attempt meets requirement
+        byte[] finalBytes = dataStream.toByteArray();
+        if (finalBytes != null && finalBytes.length <= maxSizeBytes) {
+            return finalBytes;
+        }
+
+        return null;
     }
 
     /**
@@ -759,18 +827,6 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
-
-       if(imageSizeLimit > 0) {
-            long imageSize = getImageSize(uri);
-            if (imageSize == -1) {
-                this.failPicture("Unable to retrieve Image Properties");
-                return;
-            }
-            if (imageSize > imageSizeLimit) {
-                this.failPicture(IMAGE_SIZE_EXCEEDED_ERROR);
-                return;
-            }
-        }
 
         if (uri == null) {
             if (croppedUri != null) {
@@ -812,9 +868,20 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 // This is a special case to just return the path as no scaling,
                 // rotating, nor compressing needs to be done
                 if (this.targetHeight == -1 && this.targetWidth == -1 &&
-                    destType == FILE_URI && !this.correctOrientation &&
-                    getMimetypeForEncodingType().equalsIgnoreCase(mimeTypeOfGalleryFile)) {
-                    this.callbackContext.success(uriString);
+                        destType == FILE_URI && !this.correctOrientation &&
+                        getMimetypeForEncodingType().equalsIgnoreCase(mimeTypeOfGalleryFile)) {
+
+                    bitmap = createBitmap(data);
+                    // Double-check the bitmap.
+                    if (bitmap == null) {
+                        this.failPicture("Unable to create bitmap!");
+                        return;
+                    }
+                    String modifiedPath = writeCompressedBitmapToFile(bitmap, uri, mimeTypeOfGalleryFile);
+                    if (modifiedPath == null) {
+                        return;
+                    }
+                    this.callbackContext.success("file://" + modifiedPath + "?" + System.currentTimeMillis());
                 } else {
                     try {
                         bitmap = getScaledAndRotatedBitmap(data, mimeTypeOfGalleryFile);
@@ -840,6 +907,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                             !mimeTypeOfGalleryFile.equalsIgnoreCase(getMimetypeForEncodingType())) {
                             try {
                                 String modifiedPath = this.outputModifiedBitmap(bitmap, uri, mimeTypeOfGalleryFile);
+                                if (modifiedPath == null) {
+                                      return;
+                                  }
                                 // The modified image is cached by the app in order to get around this and not have to delete you
                                 // application cache I'm adding the current system time to the end of the file url.
                                 this.callbackContext.success("file://" + modifiedPath + "?" + System.currentTimeMillis());
@@ -1070,6 +1140,23 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     }
 
+
+    /**
+     *  Decodes a byte array into a {@link Bitmap}.
+     *
+     * @param data the raw image data to decode
+     * @return a decoded {@link Bitmap} if successful;  {@code null} if decoding fails
+     */
+    private Bitmap createBitmap(byte[] data) {
+        Bitmap image = null;
+        try {
+            image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
+        }  catch (OutOfMemoryError | Exception e) {
+            callbackContext.error(e.getLocalizedMessage());
+        }
+        return image;
+    }
+
     /**
      * Return a scaled and rotated bitmap based on the target width and height
      *
@@ -1080,15 +1167,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private Bitmap getScaledAndRotatedBitmap(byte[] data, String mimeType) throws IOException {
         // If no new width or height were specified, and orientation is not needed return the original bitmap
         if ((this.targetWidth <= 0 && this.targetHeight <= 0 && !(this.correctOrientation))) {
-          Bitmap image = null;
-          try {
-              image = BitmapFactory.decodeStream(new ByteArrayInputStream(data));
-          }  catch (OutOfMemoryError e) {
-              callbackContext.error(e.getLocalizedMessage());
-          } catch (Exception e){
-              callbackContext.error(e.getLocalizedMessage());
-          }
-          return image;
+            return createBitmap(data);
         }
 
         int rotate = 0;
