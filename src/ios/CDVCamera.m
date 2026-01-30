@@ -281,7 +281,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
     // Use UIImagePickerController for camera or as image picker for iOS older than 14
     // UIImagePickerController must be created and presented on the main thread.
     dispatch_async(dispatch_get_main_queue(), ^{
-        CDVCameraPicker* cameraPicker = [CDVCameraPicker createFromPictureOptions:pictureOptions];
+        CDVUIImagePickerController* cameraPicker = [CDVUIImagePickerController createFromPictureOptions:pictureOptions];
         self.pickerController = cameraPicker;
 
         cameraPicker.delegate = self;
@@ -977,7 +977,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                         }];
       }
   }
-    __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
+    __weak CDVUIImagePickerController* cameraPicker = (CDVUIImagePickerController*)picker;
     __weak CDVCamera* weakSelf = self;
 
     dispatch_block_t invoke = ^(void) {
@@ -1019,7 +1019,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerControllerDidCancel:(UIImagePickerController*)picker
 {
-    __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
+    __weak CDVUIImagePickerController* cameraPicker = (CDVUIImagePickerController*)picker;
     __weak CDVCamera* weakSelf = self;
 
     dispatch_block_t invoke = ^ (void) {
@@ -1218,7 +1218,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 @end
 
-@implementation CDVCameraPicker
+@implementation CDVUIImagePickerController
 
 - (BOOL)prefersStatusBarHidden
 {
@@ -1242,7 +1242,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 + (instancetype)createFromPictureOptions:(CDVPictureOptions*)pictureOptions
 {
-    CDVCameraPicker* cameraPicker = [[CDVCameraPicker alloc] init];
+    CDVUIImagePickerController* cameraPicker = [[CDVUIImagePickerController alloc] init];
     cameraPicker.pictureOptions = pictureOptions;
     cameraPicker.sourceType = pictureOptions.sourceType;
     cameraPicker.allowsEditing = pictureOptions.allowsEditing;
