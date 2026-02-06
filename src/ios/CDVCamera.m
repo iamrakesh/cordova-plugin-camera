@@ -953,7 +953,7 @@ static NSString* MIME_JPEG    = @"image/jpeg";
                               if (imageSize > imageSizeLimit) {
                                   dispatch_async(dispatch_get_main_queue(), ^{
                                                                     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
-                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
+                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.cdvUIImagePickerController.callbackId];
                                                                     [self.viewController dismissViewControllerAnimated:YES completion:nil];
                                                                 });
                                   return;
