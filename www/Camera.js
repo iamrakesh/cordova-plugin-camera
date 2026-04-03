@@ -138,14 +138,13 @@ cameraExport.getPicture = function (successCallback, errorCallback, options) {
     const correctOrientation = !!options.correctOrientation;
     const saveToPhotoAlbum = !!options.saveToPhotoAlbum;
     const cameraDirection = getValue(options.cameraDirection, Camera.Direction.BACK);
-    const imageSizeLimit = getValue(options.fileSize);
 
     if (allowEdit) {
         console.warn('allowEdit is deprecated. It does not work reliably on all platforms. Utilise a dedicated image editing library instead. allowEdit functionality is scheduled to be removed in a future release.');
     }
 
     const args = [quality, destinationType, sourceType, targetWidth, targetHeight, encodingType,
-        mediaType, allowEdit, correctOrientation, saveToPhotoAlbum, cameraDirection, imageSizeLimit];
+        mediaType, allowEdit, correctOrientation, saveToPhotoAlbum, cameraDirection];
 
     exec(successCallback, errorCallback, 'Camera', 'takePicture', args);
 };
