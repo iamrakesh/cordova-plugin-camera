@@ -37,7 +37,6 @@
 
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
-NSUInteger imageSizeLimit;
 static const NSString * IMAGE_SIZE_EXCEEDED_ERROR = @"PHOTO_SIZE_EXCEEDS_THE_ALLOWED_LIMIT";
 
 static NSString* toBase64(NSData* data)
@@ -89,7 +88,6 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
     pictureOptions.usesGeolocation = NO;
     id sizeLimitArg = [command argumentAtIndex:12];
-    imageSizeLimit = (sizeLimitArg == [NSNull null] || [sizeLimitArg longValue] <= 0) ? 0 : [sizeLimitArg longValue] * 1024 * 1024;
 
 
     return pictureOptions;
@@ -935,32 +933,6 @@ static NSString* MIME_JPEG    = @"image/jpeg";
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
-  if(imageSizeLimit > 0){
-    PHAsset *phAsset = [info objectForKey:UIImagePickerControllerPHAsset];
-    if (phAsset) {
-        NSArray *resources = [PHAssetResource assetResourcesForAsset:phAsset];
-        PHAssetResource *resource = [resources firstObject];
-
-        __block long long imageSize = 0;
-        PHAssetResourceManager *manager = [PHAssetResourceManager defaultManager];
-
-        [manager requestDataForAssetResource:resource
-                                     options:nil
-                            dataReceivedHandler:^(NSData *data) {
-                                imageSize += data.length;
-                            }
-                          completionHandler:^(NSError *error) {
-                              if (imageSize > imageSizeLimit) {
-                                  dispatch_async(dispatch_get_main_queue(), ^{
-                                                                    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:IMAGE_SIZE_EXCEEDED_ERROR];
-                                                                    [self.commandDelegate sendPluginResult:result callbackId:self.cdvUIImagePickerController.callbackId];
-                                                                    [self.viewController dismissViewControllerAnimated:YES completion:nil];
-                                                                });
-                                  return;
-                              }
-                        }];
-      }
-  }
     __weak CDVUIImagePickerController* cameraPicker = (CDVUIImagePickerController*)picker;
     __weak CDVCamera* weakSelf = self;
 
